@@ -1,6 +1,23 @@
+"""
+xiaoqi-forecaster — Metaculus FutureEval bot (Fall 2026 + MiniBench).
+
+Built from the official Metaculus template bot
+(https://github.com/Metaculus/metac-bot-template), with these changes:
+- Bot renamed and LLM choice pinned via environment variables, so the same
+  code runs unchanged on a laptop and in GitHub Actions.
+- Research defaults to AskNews when its keys are set, otherwise to a
+  web-search-enabled ("...:online") model via SmartSearcher.
+- `--dry-run` / `DRY_RUN=1` runs the full pipeline without publishing
+  anything to Metaculus.
+- Forecasting prompts are unchanged from the official template — they are
+  Metaculus's own battle-tested prompts.
+
+Open source (MIT). Fork: https://github.com/Metaculus/metac-bot-template
+"""
 import argparse
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -45,8 +62,53 @@ dotenv.load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-class FallTemplateBot2026(ForecastBot):
+# ---------------------------------------------------------------------------
+# Model selection (all overridable via environment variables).
+#
+# DEFAULT_MODEL: the reasoning model. The ":online" suffix gives it native
+# web search through OpenRouter (recommended by Metaculus's resources page,
+# which cites "openrouter/openai/gpt-5.2:online" as an example).
+# PARSER_MODEL: cheap model that only reformats reasoning into a forecast.
+# RESEARCHER_MODEL: "asknews/news-summaries" when AskNews keys are set,
+# otherwise a SmartSearcher driven by the default model.
+# ---------------------------------------------------------------------------
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openrouter/openai/gpt-5.2:online")
+PARSER_MODEL = os.getenv("PARSER_MODEL", "openrouter/openai/gpt-4o-mini")
+
+
+def _build_llms() -> dict:
+    researcher: str | GeneralLlm
+    if os.getenv("ASKNEWS_CLIENT_ID") and os.getenv("ASKNEWS_SECRET"):
+        researcher = "asknews/news-summaries"
+    else:
+        researcher = f"smart-searcher/{DEFAULT_MODEL}"
+    return {
+        "default": GeneralLlm(
+            model=DEFAULT_MODEL,
+            temperature=0.3,
+            timeout=120,
+            allowed_tries=2,
+        ),
+        "summarizer": GeneralLlm(
+            model=PARSER_MODEL,
+            temperature=0,
+            timeout=60,
+            allowed_tries=2,
+        ),
+        "researcher": researcher,
+        "parser": GeneralLlm(
+            model=PARSER_MODEL,
+            temperature=0,
+            timeout=60,
+            allowed_tries=2,
+        ),
+    }
+
+
+class XiaoqiForecastBot(ForecastBot):
     """
+    Forecasting bot for the Fall 2026 FutureEval Bot Tournament + MiniBench.
+
     This is the template bot for the Fall 2026 FutureEval Bot Tournament.
     This is a copy of what is used by Metaculus to run the Metac Bots in our benchmark, provided as a template for new bot makers.
     This template is given as-is, and is use-at-your-own-risk.
@@ -689,7 +751,7 @@ if __name__ == "__main__":
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-    parser = argparse.ArgumentParser(description="Run the template forecasting bot")
+    parser = argparse.ArgumentParser(description="Run the xiaoqi-forecaster bot")
     parser.add_argument(
         "--mode",
         type=str,
@@ -697,17 +759,24 @@ if __name__ == "__main__":
         default="tournament",
         help="What to forecast on (default: tournament)",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run the full pipeline but do NOT publish forecasts to Metaculus",
+    )
     args = parser.parse_args()
     run_mode: Literal["tournament", "metaculus_cup", "test_questions"] = args.mode
 
     check_environment(strict=True)
-    publish_to_metaculus = True
+    publish_to_metaculus = not (
+        args.dry_run or os.getenv("DRY_RUN", "").lower() in ("1", "true", "yes")
+    )
     print_startup_banner(run_mode, will_publish=publish_to_metaculus)
 
-    # Configure the bot. The `llms=` block below is commented out to use
-    # whichever default models forecasting-tools picks based on your env vars;
-    # uncomment and edit to pin specific models.
-    template_bot = FallTemplateBot2026(
+    # Models are pinned via DEFAULT_MODEL / PARSER_MODEL env vars (see
+    # _build_llms above). Researcher is AskNews when its keys are set,
+    # otherwise a web-search-enabled model via SmartSearcher.
+    template_bot = XiaoqiForecastBot(
         research_reports_per_question=1,
         predictions_per_research_report=5,
         use_research_summary_to_forecast=False,
@@ -715,17 +784,7 @@ if __name__ == "__main__":
         folder_to_save_reports_to=None,
         skip_previously_forecasted_questions=True,
         extra_metadata_in_explanation=True,
-        # llms={
-        #     "default": GeneralLlm(
-        #         model="openrouter/openai/gpt-4o",
-        #         temperature=0.3,
-        #         timeout=40,
-        #         allowed_tries=2,
-        #     ),
-        #     "summarizer": "openai/gpt-4o-mini",
-        #     "researcher": "asknews/news-summaries",
-        #     "parser": "openai/gpt-4o-mini",
-        # },
+        llms=_build_llms(),
     )
 
     # Per-mode tournament URL shown in the summary banner footer. These
