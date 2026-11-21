@@ -65,15 +65,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Model selection (all overridable via environment variables).
 #
-# DEFAULT_MODEL: the reasoning model. The ":online" suffix gives it native
-# web search through OpenRouter (recommended by Metaculus's resources page,
-# which cites "openrouter/openai/gpt-5.2:online" as an example).
+# DEFAULT_MODEL: the reasoning model. Switched 2026-11-20 from
+# "openrouter/openai/gpt-5.2:online" to direct OpenAI because the user's
+# $40 credit sits on OpenAI, not OpenRouter. Direct OpenAI has no ":online"
+# native web search, so research runs without live search unless AskNews
+# or Exa keys are set (see RESEARCHER_MODEL below).
 # PARSER_MODEL: cheap model that only reformats reasoning into a forecast.
 # RESEARCHER_MODEL: "asknews/news-summaries" when AskNews keys are set,
 # otherwise a SmartSearcher driven by the default model.
 # ---------------------------------------------------------------------------
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openrouter/openai/gpt-5.2:online")
-PARSER_MODEL = os.getenv("PARSER_MODEL", "openrouter/openai/gpt-4o-mini")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-5.2")
+PARSER_MODEL = os.getenv("PARSER_MODEL", "openai/gpt-4o-mini")
 
 
 def _build_llms() -> dict:
