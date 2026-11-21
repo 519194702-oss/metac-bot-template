@@ -82,8 +82,22 @@ def _build_llms() -> dict:
     researcher: str | GeneralLlm
     if os.getenv("ASKNEWS_CLIENT_ID") and os.getenv("ASKNEWS_SECRET"):
         researcher = "asknews/news-summaries"
-    else:
+    elif os.getenv("EXA_API_KEY"):
+        # Web research via Exa. NOTE (2026-11-20): Exa's free credits are
+        # locked behind adding a payment method, so with no funded Exa key
+        # this branch stays off.
         researcher = f"smart-searcher/{DEFAULT_MODEL}"
+    else:
+        # No search provider configured: LLM-only research from the model's
+        # own knowledge (no live web info). Weaker forecasts, but runs with
+        # zero extra keys. Re-enable web research by setting EXA_API_KEY
+        # (or AskNews keys) and this picks SmartSearcher back up.
+        researcher = GeneralLlm(
+            model=DEFAULT_MODEL,
+            temperature=0.1,
+            timeout=120,
+            allowed_tries=2,
+        )
     return {
         "default": GeneralLlm(
             model=DEFAULT_MODEL,
