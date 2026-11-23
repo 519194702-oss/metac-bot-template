@@ -205,11 +205,13 @@ class XiaoqiForecastBot(ForecastBot):
     _concurrency_limiter = asyncio.Semaphore(_max_concurrent_questions)
     _structure_output_validation_samples = 2
 
-    # Groq free-tier pacing (2026-11-23): the free tier caps
-    # llama-3.3-70b at 12K TPM and gpt-oss-20b at 8K TPM, while one
-    # question's LLM calls total ~6-9K tokens. Questions run sequentially
-    # (concurrency 1), so spacing research starts >=75s apart keeps every
-    # rolling 60s window under the caps. Slow (~1 question/min) but free.
+    # Groq free-tier pacing (2026-11-23): this free org only has the
+    # gpt-oss models (8K TPM each, separate budgets per model); the
+    # Llama models are Enterprise-only and Llama 4 Scout was removed.
+    # One question's LLM calls total ~5K tokens on the default model
+    # (research + forecast) and ~3.3K on the parser model, so spacing
+    # research starts >=75s apart keeps every rolling 60s window under
+    # the caps. Slow (~1 question/min) but free.
     _min_seconds_between_questions = 75
     _last_research_start: float | None = None
 
