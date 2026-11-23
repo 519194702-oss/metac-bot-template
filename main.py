@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -204,10 +205,31 @@ class XiaoqiForecastBot(ForecastBot):
     _concurrency_limiter = asyncio.Semaphore(_max_concurrent_questions)
     _structure_output_validation_samples = 2
 
+    # Groq free-tier pacing (2026-11-23): the free tier caps
+    # llama-3.3-70b at 12K TPM and gpt-oss-20b at 8K TPM, while one
+    # question's LLM calls total ~6-9K tokens. Questions run sequentially
+    # (concurrency 1), so spacing research starts >=75s apart keeps every
+    # rolling 60s window under the caps. Slow (~1 question/min) but free.
+    _min_seconds_between_questions = 75
+    _last_research_start: float | None = None
+
     ##################################### RESEARCH #####################################
 
     async def run_research(self, question: MetaculusQuestion) -> str:
         async with self._concurrency_limiter:
+            # Pace questions for the Groq free tier (see the class var
+            # above): wait until >=75s since the previous question's
+            # research started, so the rolling 60s token window stays
+            # under the per-model TPM caps.
+            now = time.monotonic()
+            if self._last_research_start is not None:
+                elapsed = now - self._last_research_start
+                if elapsed < self._min_seconds_between_questions:
+                    await asyncio.sleep(
+                        self._min_seconds_between_questions - elapsed
+                    )
+            self._last_research_start = time.monotonic()
+
             research = ""
             researcher = self.get_llm("researcher")
 
@@ -229,8 +251,11 @@ class XiaoqiForecastBot(ForecastBot):
                 searcher = SmartSearcher(
                     model=model_name,
                     temperature=0,
-                    num_searches_to_run=2,
-                    num_sites_per_search=10,
+                    # Lean research for the Groq free tier (2026-11-23):
+                    # 1 search x 3 sites keeps the research prompt at
+                    # ~2-4K tokens instead of 13-26K (was 2 x 10).
+                    num_searches_to_run=1,
+                    num_sites_per_search=3,
                     use_advanced_filters=False,
                 )
                 research = await searcher.invoke(prompt)
@@ -794,7 +819,10 @@ if __name__ == "__main__":
     # otherwise a web-search-enabled model via SmartSearcher.
     template_bot = XiaoqiForecastBot(
         research_reports_per_question=1,
-        predictions_per_research_report=5,
+        # 1 prediction per question instead of 5 (2026-11-23): the Groq
+        # free tier's per-minute token caps can't afford 5 forecasts +
+        # 5 parses per question. Single prediction, still research-based.
+        predictions_per_research_report=1,
         use_research_summary_to_forecast=False,
         publish_reports_to_metaculus=publish_to_metaculus,
         folder_to_save_reports_to=None,
